@@ -29,6 +29,20 @@ GEMINI_MODEL=gemini-3.1-flash-lite
 
 `GEMINI_API_KEY`가 없거나 Gemini 호출이 실패하면 기존 기본 parser로 자동 fallback됩니다.
 
+## Vercel 배포
+
+Vercel에서 프로젝트를 Import한 뒤 아래처럼 설정합니다.
+
+- Framework Preset: `Other`
+- Root Directory: 저장소 루트
+- Build Command: 비워둠
+- Output Directory: 비워둠
+- Environment Variables:
+  - `GEMINI_API_KEY`: Gemini API 키
+  - `GEMINI_MODEL`: 필요하면 지정, 비워두면 `gemini-3.1-flash-lite`
+
+루트의 `server.js`가 Vercel의 Node 서버 엔트리포인트이고, `vercel.json`이 `frontend/` 정적 파일을 서버 함수 번들에 포함합니다.
+
 ## API 예시
 
 ```bash
