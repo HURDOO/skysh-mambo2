@@ -1210,6 +1210,153 @@ async function analyzeClaimGraph(input) {
   };
 }
 
+async function answerChatWithGemini(input) {
+  const requestId = createRequestId();
+  const question = String(input.question || "").trim();
+  if (!question) {
+    const error = new Error("question is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!process.env.GEMINI_API_KEY) {
+    const error = new Error("GEMINI_API_KEY is not set.");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const { GoogleGenAI, ThinkingLevel } = await import("@google/genai");
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY
+  });
+  const analysisContext = buildChatAnalysisContext(input);
+  const config = {
+    systemInstruction: [
+      {
+        text: [
+          "You are ClaimGraph's mini chatbot.",
+          "Answer in Korean, briefly and practically.",
+          "Use the original post, market symbol, and analysis context provided by the app.",
+          "Do not invent market data or pretend unavailable data was verified.",
+          "This is not financial advice. Explain evidence, uncertainty, and what to check next.",
+          "Keep answers under 5 short sentences unless the user asks for detail."
+        ].join("\n")
+      }
+    ]
+  };
+
+  if (ThinkingLevel?.MINIMAL) {
+    config.thinkingConfig = {
+      thinkingLevel: ThinkingLevel.MINIMAL
+    };
+  }
+
+  logInfo("chat.gemini.request.start", {
+    requestId,
+    model: GEMINI_MODEL,
+    questionChars: question.length,
+    hasAnalysis: Boolean(input.analysisResult)
+  });
+
+  const response = await ai.models.generateContentStream({
+    model: GEMINI_MODEL,
+    config,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: [
+              "App context JSON:",
+              JSON.stringify(analysisContext, null, 2),
+              "",
+              "User question:",
+              question
+            ].join("\n")
+          }
+        ]
+      }
+    ]
+  });
+
+  let answer = "";
+  for await (const chunk of response) {
+    const chunkText = typeof chunk.text === "function" ? chunk.text() : chunk.text;
+    if (chunkText) answer += chunkText;
+  }
+
+  answer = answer.trim();
+  if (!answer) throw new Error("Gemini returned an empty chat response.");
+
+  logInfo("chat.gemini.request.done", {
+    requestId,
+    model: GEMINI_MODEL,
+    answerChars: answer.length
+  });
+
+  return {
+    success: true,
+    requestId,
+    source: "gemini",
+    model: GEMINI_MODEL,
+    answer
+  };
+}
+
+function buildChatAnalysisContext(input) {
+  const result = input?.analysisResult;
+  const sourceText = String(input?.sourceText || "").trim();
+  const symbol = String(input?.symbol || result?.symbol || "").trim();
+
+  if (!result || typeof result !== "object") {
+    return {
+      available: false,
+      symbol: symbol || null,
+      originalPost: sourceText ? sourceText.slice(0, 2000) : null,
+      note: "No analysis result is available yet."
+    };
+  }
+
+  const summary = result.summary || {};
+  const snapshot = result.marketSnapshot || {};
+  const nodes = Array.isArray(result.graph?.nodes) ? result.graph.nodes : [];
+
+  return {
+    available: true,
+    requestId: result.requestId || null,
+    symbol: symbol || result.symbol || null,
+    originalPost: sourceText ? sourceText.slice(0, 2000) : null,
+    generatedAt: result.generatedAt || null,
+    summary: {
+      riskLabel: summary.riskLabel || null,
+      neutralAssessment: summary.neutralAssessment || null,
+      claimCoverage: summary.claimCoverage ?? null,
+      evidenceSupportScore: summary.evidenceSupportScore ?? null,
+      conclusionSupportScore: summary.conclusionSupportScore ?? null,
+      weakestPremiseText: summary.weakestPremiseText || null,
+      counts: summary.counts || null,
+      dependency: summary.dependency || null
+    },
+    marketSnapshot: {
+      source: snapshot.source || null,
+      available: Boolean(snapshot.available),
+      fetchedAt: snapshot.fetchedAt || null,
+      currentPrice: snapshot.currentPrice ?? null,
+      volumeRatio: snapshot.volumeRatio ?? null,
+      bidAskRatio: snapshot.bidAskRatio ?? null,
+      errors: Array.isArray(snapshot.errors) ? snapshot.errors.slice(0, 5) : []
+    },
+    claims: nodes.slice(0, 12).map((node) => ({
+      id: node.id,
+      text: String(node.text || "").slice(0, 220),
+      type: node.type,
+      truthState: node.truthState,
+      confidence: node.confidence ?? null,
+      evidence: node.evidence ? String(node.evidence).slice(0, 260) : null
+    }))
+  };
+}
+
 async function routeApi(req, res) {
   if (req.method === "OPTIONS") {
     sendJson(res, 204, {});
@@ -1251,6 +1398,40 @@ async function routeApi(req, res) {
       sendJson(res, error.statusCode || 500, {
         success: false,
         error: error.message || "ANALYSIS_FAILED"
+      });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/v1/claimgraph/chat") {
+    try {
+      const body = await readRequestBody(req);
+      const payload = body ? JSON.parse(body) : {};
+      logInfo("http.request", {
+        method: req.method,
+        url: req.url,
+        bodyChars: body.length,
+        questionChars: typeof payload.question === "string" ? payload.question.length : 0,
+        hasAnalysis: Boolean(payload.analysisResult)
+      });
+      const result = await answerChatWithGemini(payload);
+      logInfo("http.response", {
+        method: req.method,
+        url: req.url,
+        status: 200,
+        requestId: result.requestId,
+        source: result.source
+      });
+      sendJson(res, 200, result);
+    } catch (error) {
+      logError("http.response.failed", error, {
+        method: req.method,
+        url: req.url,
+        status: error.statusCode || 500
+      });
+      sendJson(res, error.statusCode || 500, {
+        success: false,
+        error: error.message || "CHAT_FAILED"
       });
     }
     return;
