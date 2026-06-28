@@ -268,12 +268,10 @@ function typeLabel(type) {
 
 function stateLabel(state) {
   const labels = {
-    SUPPORTED: "지지됨",
-    CONTRADICTED: "데이터 충돌",
     UNVERIFIABLE: "검증 불가",
-    PENDING: "조건 대기",
+    SUPPORTED: "지지됨",
     EXPIRED: "근거 만료",
-    UNSUPPORTED_CONCLUSION: "근거 부족",
+    CONTRADICTED: "충돌",
     DERIVED: "계산 결과"
   };
   return labels[state] || state;
@@ -287,7 +285,7 @@ function riskLabel(label) {
     CONCLUSION_HAS_DATA_SUPPORT: "데이터 근거 있음",
     CONCLUSION_SUPPORT_IS_WEAK: "결론 근거 약함"
   };
-  return labels[label] || label || "분석 대기";
+  return labels[label] || label || "분석 전";
 }
 
 function parserSourceLabel(parser) {
@@ -345,12 +343,10 @@ function setMetric(valueId, barId, value) {
 
 function stateColor(state) {
   const colors = {
-    SUPPORTED: "#188a59",
-    CONTRADICTED: "#c64343",
     UNVERIFIABLE: "#6f7787",
-    PENDING: "#c57a12",
+    SUPPORTED: "#188a59",
     EXPIRED: "#6554c0",
-    UNSUPPORTED_CONCLUSION: "#c64343"
+    CONTRADICTED: "#c64343"
   };
   return colors[state] || "#2f68d8";
 }

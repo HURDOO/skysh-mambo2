@@ -39,7 +39,7 @@
 
           <aside class="result-panel" aria-label="분석 요약">
             <div class="verdict-head">
-              <span id="riskLabel">분석 대기</span>
+              <span id="riskLabel">분석 전</span>
               <strong id="verdictTitle">글을 입력하면 결론 근거를 계산합니다</strong>
             </div>
 
@@ -91,7 +91,7 @@
               <h2>근거 흐름</h2>
               <p>왼쪽의 개별 주장이 오른쪽 결론을 얼마나 받치는지 보여줍니다.</p>
             </div>
-            <span id="graphSummary">대기 중</span>
+            <span id="graphSummary">분석 전</span>
           </div>
           <div class="graph-frame">
             <svg id="claimGraph" role="img" aria-label="ClaimGraph 논리 그래프"></svg>
@@ -100,19 +100,14 @@
 
         <section class="legend-panel" aria-label="상태 설명">
           <div class="legend-item">
+            <span class="dot state-UNVERIFIABLE"></span>
+            <strong>검증 불가</strong>
+            <p>공개 데이터로는 확인할 수 없습니다.</p>
+          </div>
+          <div class="legend-item">
             <span class="dot state-SUPPORTED"></span>
             <strong>지지됨</strong>
             <p>현재 업비트 데이터와 대체로 맞습니다.</p>
-          </div>
-          <div class="legend-item">
-            <span class="dot state-CONTRADICTED"></span>
-            <strong>충돌</strong>
-            <p>현재 데이터와 반대로 보입니다.</p>
-          </div>
-          <div class="legend-item">
-            <span class="dot state-PENDING"></span>
-            <strong>대기</strong>
-            <p>조건이 아직 발생하지 않았습니다.</p>
           </div>
           <div class="legend-item">
             <span class="dot state-EXPIRED"></span>
@@ -120,9 +115,9 @@
             <p>한때 맞았어도 지금 근거로 쓰기 어렵습니다.</p>
           </div>
           <div class="legend-item">
-            <span class="dot state-UNVERIFIABLE"></span>
-            <strong>검증 불가</strong>
-            <p>공개 데이터로는 확인할 수 없습니다.</p>
+            <span class="dot state-CONTRADICTED"></span>
+            <strong>충돌</strong>
+            <p>현재 데이터와 반대로 보입니다.</p>
           </div>
         </section>
 

@@ -16,7 +16,6 @@ const STATE_SCORE = {
   SUPPORTED: 1,
   CONTRADICTED: 0,
   UNVERIFIABLE: 0.05,
-  PENDING: 0.35,
   EXPIRED: 0.1
 };
 
@@ -432,27 +431,32 @@ async function parseClaimsWithGemini(text, market, snapshot, requestId = null) {
 
 4. Graph 아래에는 Node 프로퍼티로 논리 그래프를 구성해야 한다.
 이때 논리 그래프란, 원인과 결과를 화살표로 이은 논리 구조이다.
+논리 그래프는 검증이 필요한 조건 P와 논리적으로 이끌어지는 결론 C로 구성된다.
+주어진 커뮤니티 글을 맥락 분류 및 검증 가능 여부로 쪼개며 P와 C에 따라 적절히 판단하여 표현하며, 이떄 문장을 수정 혹은 요약하지 말고 쪼개기만 하여 구성한다.
 원인과 결과는 없거나 여러 개가 될 수 있으며, 화살표 또한 여러 항목을 가리킬 수 있다. 주의할 점은 문장의 명제는 빠짐없이 작성해야 되며, 가능한 모든 관계를 도출해야 한다.  
-5. NodeName에는 노드로 표현하고자 하는 논리 항목을 수정 단어 없이 자연어로 작성한다.
+5. NodeName에는 노드로 표현하고자 하는 논리 항목을 수정 혹은 요약 자연어로 작성한다. 되도록 문장에서 가져온 부분을 그대로 작성한다.
 6. NodeID는 그래프 구성에서 노드를 식별하는 정수 아이디다.
 NodeSupportID는 이 노드가 화살표로 가리킬 대상 노드의 NodeID다.
 NodeState는 당신이 판단한 논리 상태를 1-4 사이의 정수 문자열로 표시한다.
 1) 검증불가
-2) 지지됨
+2) 지지됨 (검증 성공)
 3) 만료됨
 4) 충돌
 
 주의:
 - 가격 상승을 예측하거나 투자 조언을 하지 말고, 글의 결론이 어떤 전제에 의존하는지만 분석한다.
+- 현재 업비트 데이터와 부합한다고 인정할 수 있는 노드는 NodeState를 2로 둔다.
 - 공개 데이터로 확인할 수 없는 세력, 고래, 기관의 의도는 검증불가로 둔다.
-- 문장 전체를 참/거짓으로 단정하지 말고, 원자 주장과 결론을 분리한다.`
+- 현재 데이터로 확인할 수 있는 사항은 검증 후 지지됨/만료됨/충돌 여부를 표시한다.
+- 문장 전체를 참/거짓으로 단정하지 말고, 원자 주장과 결론을 분리한다.
+- 너무 비관적으로 판단하지 말고, 사용자에게 실질적인 도움을 주는 것을 목표로 한다.`
       }
     ]
   };
 
-  if (ThinkingLevel?.MINIMAL) {
+  if (ThinkingLevel?.DYNAMIC) {
     config.thinkingConfig = {
-      thinkingLevel: ThinkingLevel.MINIMAL
+      thinkingLevel: ThinkingLevel.DYNAMIC
     };
   }
 
@@ -732,7 +736,7 @@ function evaluateVolumeClaim(claim, snapshot) {
   const ttlSeconds = age === null ? null : Math.max(0, Math.round(15 * 60 - age));
 
   if (ratio === null) {
-    return pendingClaim(claim, "거래량 캔들 데이터를 아직 가져오지 못했습니다.");
+    return unverifiableClaim(claim, "거래량 캔들 데이터를 가져오지 못해 현재 공개 데이터로 검증할 수 없습니다.");
   }
 
   if (ttlSeconds !== null && ttlSeconds <= 0) {
@@ -764,10 +768,10 @@ function evaluateVolumeClaim(claim, snapshot) {
   return {
     ...claim,
     verifiability: "VERIFIABLE",
-    truthState: "PENDING",
+    truthState: "CONTRADICTED",
     confidence: 0.42,
     ttlSeconds,
-    evidence: `거래량 비율은 ${ratio.toFixed(2)}배로, 강한 증가라고 보기에는 아직 애매합니다.`
+    evidence: `거래량 비율은 ${ratio.toFixed(2)}배로, 강한 증가 주장과 충돌합니다.`
   };
 }
 
@@ -777,7 +781,7 @@ function evaluateOrderbookClaim(claim, snapshot) {
   const ttlSeconds = age === null ? null : Math.max(0, Math.round(60 - age));
 
   if (!snapshot.orderbook || !metrics) {
-    return pendingClaim(claim, "호가창 데이터를 아직 가져오지 못했습니다.");
+    return unverifiableClaim(claim, "호가창 데이터를 가져오지 못해 현재 공개 데이터로 검증할 수 없습니다.");
   }
 
   if (ttlSeconds !== null && ttlSeconds <= 0) {
@@ -813,10 +817,10 @@ function evaluateOrderbookClaim(claim, snapshot) {
   return {
     ...claim,
     verifiability: "VERIFIABLE",
-    truthState: "PENDING",
+    truthState: "CONTRADICTED",
     confidence: 0.4,
     ttlSeconds,
-    evidence: `상위 호가 기준 매수/매도 잔량 비율은 ${bidAskRatio.toFixed(2)}입니다. 강한 벽으로 보기는 아직 부족합니다.`
+    evidence: `상위 호가 기준 매수/매도 잔량 비율은 ${bidAskRatio.toFixed(2)}입니다. 강한 벽 주장과 충돌합니다.`
   };
 }
 
@@ -828,7 +832,7 @@ function evaluatePriceClaim(claim, snapshot) {
       : Math.max(0, Math.round(10 * 60 - metrics.candleAgeSeconds));
 
   if (!metrics || !metrics.currentPrice) {
-    return pendingClaim(claim, "현재가 데이터를 아직 가져오지 못했습니다.");
+    return unverifiableClaim(claim, "현재가 데이터를 가져오지 못해 현재 공개 데이터로 검증할 수 없습니다.");
   }
 
   if (ttlSeconds !== null && ttlSeconds <= 0) {
@@ -848,14 +852,11 @@ function evaluatePriceClaim(claim, snapshot) {
       };
     }
 
-    return {
-      ...claim,
-      verifiability: "VERIFIABLE",
-      truthState: "PENDING",
-      confidence: 0.32,
-      ttlSeconds,
-      evidence: `현재가 ${formatKrw(metrics.currentPrice)}가 아직 주장 기준 ${formatKrw(targetPrice)}에 도달하지 않았습니다.`
-    };
+    return unverifiableClaim(
+      claim,
+      `현재가 ${formatKrw(metrics.currentPrice)}가 주장 기준 ${formatKrw(targetPrice)}에 도달하지 않아 조건부 주장을 검증할 수 없습니다.`,
+      ttlSeconds
+    );
   }
 
   if (/급등|상승|간다|열려/.test(claim.sourceText)) {
@@ -894,23 +895,16 @@ function evaluatePriceClaim(claim, snapshot) {
     };
   }
 
-  return {
-    ...claim,
-    verifiability: "VERIFIABLE",
-    truthState: "PENDING",
-    confidence: 0.36,
-    ttlSeconds,
-    evidence: "조건부 가격 주장이며, 현재 데이터만으로 결론이 발생했다고 보기 어렵습니다."
-  };
+  return unverifiableClaim(claim, "조건부 가격 주장이며 현재 공개 데이터만으로 검증할 수 없습니다.", ttlSeconds);
 }
 
-function pendingClaim(claim, evidence) {
+function unverifiableClaim(claim, evidence, ttlSeconds = null) {
   return {
     ...claim,
-    verifiability: "VERIFIABLE",
-    truthState: "PENDING",
-    confidence: 0.25,
-    ttlSeconds: null,
+    verifiability: "UNVERIFIABLE",
+    truthState: "UNVERIFIABLE",
+    confidence: null,
+    ttlSeconds,
     evidence
   };
 }
@@ -1009,8 +1003,7 @@ function conclusionState(score, premises) {
 
   if (unverifiableWeight / totalWeight >= 0.45) return "UNVERIFIABLE";
   if (score >= 0.65) return "SUPPORTED";
-  if (score <= 0.18) return "UNSUPPORTED_CONCLUSION";
-  return "PENDING";
+  return "CONTRADICTED";
 }
 
 function buildSummary(graph) {
@@ -1020,7 +1013,6 @@ function buildSummary(graph) {
   const supported = claims.filter((claim) => claim.truthState === "SUPPORTED");
   const contradicted = claims.filter((claim) => claim.truthState === "CONTRADICTED");
   const expired = claims.filter((claim) => claim.truthState === "EXPIRED");
-  const pending = claims.filter((claim) => claim.truthState === "PENDING");
   const unverifiable = claims.filter((claim) => claim.truthState === "UNVERIFIABLE");
 
   const claimCoverage = verifiable.length / total;
@@ -1050,7 +1042,6 @@ function buildSummary(graph) {
     neutralAssessment: buildNeutralAssessment({
       supported,
       contradicted,
-      pending,
       expired,
       unverifiable,
       weakestPremise,
@@ -1062,7 +1053,6 @@ function buildSummary(graph) {
       verifiable: verifiable.length,
       supported: supported.length,
       contradicted: contradicted.length,
-      pending: pending.length,
       expired: expired.length,
       unverifiable: unverifiable.length
     },
@@ -1089,7 +1079,6 @@ function premiseRisk(claim) {
     UNVERIFIABLE: 1,
     CONTRADICTED: 0.9,
     EXPIRED: 0.72,
-    PENDING: 0.48,
     SUPPORTED: 0.12
   };
   return (statePenalty[claim.truthState] || 0.3) * edgeWeightForType(claim.type);
@@ -1127,10 +1116,6 @@ function buildNeutralAssessment(input) {
   if (input.unverifiable.length) {
     parts.push(`${input.unverifiable.length}개 주장은 공개 데이터로 검증할 수 없습니다`);
   }
-  if (!parts.length && input.pending.length) {
-    parts.push(`${input.pending.length}개 주장은 조건 발생을 더 기다려야 합니다`);
-  }
-
   const base = parts.length ? parts.join(", ") : "검증 가능한 명제가 충분히 추출되지 않았습니다";
   const weakest = input.weakestPremise
     ? ` 핵심 약한 고리는 "${input.weakestPremise.text}"입니다.`
