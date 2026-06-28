@@ -445,7 +445,7 @@ NodeState는 당신이 판단한 논리 상태를 1-4 사이의 정수 문자열
 
 주의:
 - 가격 상승을 예측하거나 투자 조언을 하지 말고, 글의 결론이 어떤 전제에 의존하는지만 분석한다.
-- 현재 업비트 데이터와 부합한다고 인정할 수 있는 노드는 NodeState를 2로 둔다.
+- 가격에 대한 P는 무조건 현재 가격과 비교한다. 조건부 가격인지는 판단하지 않는다.
 - 공개 데이터로 확인할 수 없는 세력, 고래, 기관의 의도는 검증불가로 둔다.
 - 현재 데이터로 확인할 수 있는 사항은 검증 후 지지됨/만료됨/충돌 여부를 표시한다.
 - 문장 전체를 참/거짓으로 단정하지 말고, 원자 주장과 결론을 분리한다.
@@ -599,7 +599,7 @@ function parseGeminiJson(raw) {
 function convertGeminiGraphToClaims(graph) {
   if (!Array.isArray(graph)) return [];
 
-  return graph
+  const converted = graph
     .map((item) => item?.Node || item?.node || item)
     .filter((node) => node && stringOrNull(node.NodeName))
     .slice(0, 12)
@@ -615,6 +615,17 @@ function convertGeminiGraphToClaims(graph) {
         llmState: mapGeminiNodeState(node.NodeState)
       };
     });
+
+  const idByLlmNodeId = new Map(
+    converted
+      .filter((claim) => claim.llmNodeId !== null)
+      .map((claim) => [claim.llmNodeId, claim.id])
+  );
+
+  return converted.map((claim) => ({
+    ...claim,
+    llmSupportClaimId: idByLlmNodeId.get(claim.llmSupportId) || null
+  }));
 }
 
 function inferClaimType(text) {
@@ -942,12 +953,27 @@ function buildGraph(evaluatedClaims) {
     conclusionSignals[0]?.text ||
     (premises.length ? "게시글의 투자 결론" : "검증 가능한 결론 부족");
 
-  const edges = premises.map((claim) => ({
-    from: claim.id,
-    to: "C1",
-    relation: "SUPPORTS",
-    weight: edgeWeightForType(claim.type)
-  }));
+  const premiseIds = new Set(premises.map((claim) => claim.id));
+  const geminiEdges = premises
+    .filter((claim) => claim.llmSupportClaimId && premiseIds.has(claim.llmSupportClaimId))
+    .map((claim) => ({
+      from: claim.id,
+      to: claim.llmSupportClaimId,
+      relation: "SUPPORTS",
+      weight: edgeWeightForType(claim.type),
+      source: "gemini"
+    }));
+  const pointedByGemini = new Set(geminiEdges.map((edge) => edge.from));
+  const conclusionEdges = premises
+    .filter((claim) => claim.type === "action_pressure" || !pointedByGemini.has(claim.id))
+    .map((claim) => ({
+      from: claim.id,
+      to: "C1",
+      relation: "SUPPORTS",
+      weight: edgeWeightForType(claim.type),
+      source: "derived"
+    }));
+  const edges = [...geminiEdges, ...conclusionEdges];
 
   const conclusionScore = calculateConclusionSupportScore(premises, edges);
   const conclusionNode = {
@@ -981,10 +1007,11 @@ function edgeWeightForType(type) {
 }
 
 function calculateConclusionSupportScore(premises, edges) {
-  const totalWeight = edges.reduce((sum, edge) => sum + edge.weight, 0);
+  const conclusionEdges = edges.filter((edge) => edge.to === "C1");
+  const totalWeight = conclusionEdges.reduce((sum, edge) => sum + edge.weight, 0);
   if (!premises.length || totalWeight === 0) return 0;
 
-  const weighted = edges.reduce((sum, edge) => {
+  const weighted = conclusionEdges.reduce((sum, edge) => {
     const claim = premises.find((item) => item.id === edge.from);
     const stateScore = STATE_SCORE[claim?.truthState] ?? 0;
     const confidence = typeof claim?.confidence === "number" ? claim.confidence : 0.35;
@@ -1121,9 +1148,7 @@ function buildNeutralAssessment(input) {
     ? ` 핵심 약한 고리는 "${input.weakestPremise.text}"입니다.`
     : "";
   const dependency =
-    input.dependsOnUnverifiable >= 0.4
-      ? " 결론이 검증 불가능한 전제에 크게 의존합니다."
-      : "";
+    input.dependsOnUnverifiable >= 0.4 ? " 결론이 검증 불가능한 전제에 크게 의존합니다." : "";
 
   return `${base}. 결론 근거 충족도는 ${Math.round(input.conclusionSupportScore * 100)}%입니다.${weakest}${dependency}`;
 }

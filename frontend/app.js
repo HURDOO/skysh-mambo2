@@ -124,6 +124,7 @@ function renderResult(result) {
   document.querySelector("#fallbackReason").textContent = fallbackReasonLabel(result.parser);
   document.querySelector("#upbitErrors").textContent =
     Array.isArray(snapshot.errors) && snapshot.errors.length ? snapshot.errors.join(" / ") : "--";
+  renderGeminiMeta(result.parser);
 
   renderClaimList(result.graph.nodes);
   renderGraph(result.graph);
@@ -134,6 +135,7 @@ function renderError(error) {
   document.querySelector("#riskLabel").textContent = "분석 실패";
   document.querySelector("#verdictTitle").textContent = "API 응답을 확인해 주세요";
   document.querySelector("#graphSummary").textContent = "오류";
+  renderGeminiMeta(null);
   renderGraph({ nodes: [], edges: [] });
 }
 
@@ -189,27 +191,7 @@ function renderGraph(graph) {
     return;
   }
 
-  const layout = new Map();
-  const rowGap = Math.min(82, Math.max(54, 340 / Math.max(premises.length, 1)));
-  const startY = 62 + Math.max(0, 5 - premises.length) * 14;
-
-  premises.forEach((node, index) => {
-    layout.set(node.id, {
-      x: 54,
-      y: startY + index * rowGap,
-      w: 330,
-      h: 58
-    });
-  });
-
-  if (conclusion) {
-    layout.set(conclusion.id, {
-      x: 650,
-      y: 198,
-      w: 282,
-      h: 74
-    });
-  }
+  const layout = buildGraphLayout(premises, conclusion, edges);
 
   edges.forEach((edge) => {
     const from = layout.get(edge.from);
@@ -252,6 +234,61 @@ function renderGraph(graph) {
     `
     );
   });
+}
+
+function buildGraphLayout(premises, conclusion, edges) {
+  const layout = new Map();
+  const levels = new Map(premises.map((node) => [node.id, 0]));
+  const premiseIds = new Set(premises.map((node) => node.id));
+  const supportEdges = edges.filter((edge) => premiseIds.has(edge.from) && premiseIds.has(edge.to));
+
+  for (let pass = 0; pass < premises.length; pass += 1) {
+    let changed = false;
+    supportEdges.forEach((edge) => {
+      const nextLevel = (levels.get(edge.from) || 0) + 1;
+      if (nextLevel > (levels.get(edge.to) || 0)) {
+        levels.set(edge.to, nextLevel);
+        changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+
+  const maxPremiseLevel = Math.max(0, ...Array.from(levels.values()));
+  const xStart = 54;
+  const xEnd = maxPremiseLevel > 0 ? 402 : 54;
+  const xStep = maxPremiseLevel > 0 ? (xEnd - xStart) / maxPremiseLevel : 0;
+  const groups = new Map();
+
+  premises.forEach((node) => {
+    const level = levels.get(node.id) || 0;
+    if (!groups.has(level)) groups.set(level, []);
+    groups.get(level).push(node);
+  });
+
+  groups.forEach((nodes, level) => {
+    const rowGap = Math.min(92, Math.max(62, 330 / Math.max(nodes.length, 1)));
+    const startY = 58 + Math.max(0, 4 - nodes.length) * 18;
+    nodes.forEach((node, index) => {
+      layout.set(node.id, {
+        x: Math.round(xStart + xStep * level),
+        y: Math.round(startY + index * rowGap),
+        w: 260,
+        h: 60
+      });
+    });
+  });
+
+  if (conclusion) {
+    layout.set(conclusion.id, {
+      x: 688,
+      y: 198,
+      w: 244,
+      h: 74
+    });
+  }
+
+  return layout;
 }
 
 function typeLabel(type) {
@@ -299,6 +336,23 @@ function fallbackReasonLabel(parser) {
   if (!parser?.fallbackReason) return "--";
   if (parser.fallbackReason === "GEMINI_API_KEY is not set.") return "Gemini 키 없음";
   return parser.fallbackReason;
+}
+
+function renderGeminiMeta(parser) {
+  const meta = parser?.gemini;
+  const credibility = typeof meta?.credibility === "number" ? `${meta.credibility}%` : "--";
+  document.querySelector("#geminiCredibility").textContent = credibility;
+
+  if (parser?.source === "gemini" && meta) {
+    document.querySelector("#geminiEvaluation").textContent =
+      meta.totalEvaluation || "Gemini가 종합 평가를 반환하지 않았습니다.";
+    document.querySelector("#geminiWeakest").textContent = meta.weakestPremise || "--";
+    return;
+  }
+
+  document.querySelector("#geminiEvaluation").textContent =
+    parser?.fallbackReason ? `Gemini 미사용: ${fallbackReasonLabel(parser)}` : "Gemini 분석이 연결되면 여기에 표시됩니다.";
+  document.querySelector("#geminiWeakest").textContent = "--";
 }
 
 function verdictTitle(summary) {
