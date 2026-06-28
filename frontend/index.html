@@ -199,6 +199,46 @@
       </section>
     </main>
 
+    <aside class="mini-chatbot" id="miniChatbot" aria-label="추가 질문 도우미">
+      <button
+        class="chat-toggle"
+        id="chatToggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="chatWindow"
+      >
+        <span class="chat-toggle-mark" aria-hidden="true">?</span>
+        <span>추가 질문이 있나요?</span>
+      </button>
+
+      <section class="chat-window" id="chatWindow" aria-labelledby="chatTitle">
+        <header class="chat-head">
+          <div>
+            <span>ClaimGraph 도우미</span>
+            <strong id="chatTitle">추가 질문이 있나요?</strong>
+          </div>
+          <button class="chat-icon-button" id="chatClose" type="button" aria-label="챗봇 닫기">×</button>
+        </header>
+
+        <div class="chat-messages" id="chatMessages" aria-live="polite">
+          <div class="chat-message bot">
+            분석 결과에서 헷갈리는 부분을 물어보세요. 아래 질문을 눌러도 됩니다.
+          </div>
+        </div>
+
+        <div class="chat-quick-row" aria-label="추천 질문">
+          <button type="button" data-chat-question="가장 약한 근거가 뭐야?">약한 근거</button>
+          <button type="button" data-chat-question="결론을 믿어도 돼?">결론 신뢰도</button>
+          <button type="button" data-chat-question="다음에 뭘 확인해야 해?">다음 확인</button>
+        </div>
+
+        <form class="chat-form" id="chatForm">
+          <input id="chatInput" type="text" autocomplete="off" placeholder="궁금한 점을 입력하세요" />
+          <button type="submit">전송</button>
+        </form>
+      </section>
+    </aside>
+
     <script src="/app.js"></script>
   </body>
 </html>

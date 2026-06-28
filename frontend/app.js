@@ -18,6 +18,7 @@ const symbolInput = document.querySelector("#symbolInput");
 const postInput = document.querySelector("#postInput");
 const analyzeButton = document.querySelector("#analyzeButton");
 const apiStatus = document.querySelector("#apiStatus");
+let latestAnalysisResult = null;
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -35,6 +36,7 @@ document.querySelectorAll("[data-sample]").forEach((button) => {
 
 checkHealth();
 analyze();
+initMiniChatbot();
 
 async function checkHealth() {
   try {
@@ -93,6 +95,7 @@ async function analyze() {
 }
 
 function renderResult(result) {
+  latestAnalysisResult = result;
   const summary = result.summary;
   setMetric("claimCoverage", "claimCoverageBar", summary.claimCoverage);
   setMetric("evidenceScore", "evidenceScoreBar", summary.evidenceSupportScore);
@@ -131,12 +134,137 @@ function renderResult(result) {
 }
 
 function renderError(error) {
+  latestAnalysisResult = null;
   document.querySelector("#assessment").textContent = `분석 실패: ${error.message}`;
   document.querySelector("#riskLabel").textContent = "분석 실패";
   document.querySelector("#verdictTitle").textContent = "API 응답을 확인해 주세요";
   document.querySelector("#graphSummary").textContent = "오류";
   renderGeminiMeta(null);
   renderGraph({ nodes: [], edges: [] });
+}
+
+function initMiniChatbot() {
+  const chatbot = document.querySelector("#miniChatbot");
+  const toggle = document.querySelector("#chatToggle");
+  const close = document.querySelector("#chatClose");
+  const form = document.querySelector("#chatForm");
+  const input = document.querySelector("#chatInput");
+
+  if (!chatbot || !toggle || !close || !form || !input) return;
+
+  toggle.addEventListener("click", () => {
+    setChatOpen(true);
+    input.focus();
+  });
+
+  close.addEventListener("click", () => setChatOpen(false));
+
+  document.querySelectorAll("[data-chat-question]").forEach((button) => {
+    button.addEventListener("click", () => {
+      askMiniChatbot(button.dataset.chatQuestion || button.textContent);
+      input.focus();
+    });
+  });
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const question = input.value.trim();
+    if (!question) return;
+    input.value = "";
+    askMiniChatbot(question);
+  });
+
+  function setChatOpen(isOpen) {
+    chatbot.classList.toggle("open", isOpen);
+    toggle.setAttribute("aria-expanded", String(isOpen));
+  }
+}
+
+async function askMiniChatbot(question) {
+  addChatMessage(question, "user");
+  const pendingMessage = addChatMessage("Gemini가 분석 결과를 보고 있어요...", "bot pending");
+
+  try {
+    const response = await fetch("/api/v1/claimgraph/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        question,
+        sourceText: postInput.value.trim(),
+        symbol: symbolInput.value.trim(),
+        analysisResult: latestAnalysisResult
+      })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) throw new Error(result.error || "chat failed");
+    updateChatMessage(pendingMessage, result.answer);
+  } catch (error) {
+    console.warn("[ClaimGraph UI] chat.fallback", error);
+    updateChatMessage(
+      pendingMessage,
+      `${buildMiniChatAnswer(question)}\n\nGemini 연결 실패: ${error.message}. 기본 답변으로 대신했어요.`
+    );
+  }
+}
+
+function addChatMessage(message, role) {
+  const messages = document.querySelector("#chatMessages");
+  if (!messages) return null;
+
+  const bubble = document.createElement("div");
+  bubble.className = `chat-message ${role}`;
+  bubble.textContent = message;
+  messages.appendChild(bubble);
+  messages.scrollTop = messages.scrollHeight;
+  return bubble;
+}
+
+function updateChatMessage(bubble, message) {
+  if (!bubble) return;
+  bubble.classList.remove("pending");
+  bubble.textContent = message;
+  bubble.parentElement.scrollTop = bubble.parentElement.scrollHeight;
+}
+
+function buildMiniChatAnswer(question) {
+  const result = latestAnalysisResult;
+  if (!result) {
+    return "아직 참고할 분석 결과가 없어요. 글을 입력하고 분석을 실행하면 그 결과를 기준으로 답할게요.";
+  }
+
+  const normalized = String(question || "").replace(/\s+/g, " ").toLowerCase();
+  const summary = result.summary || {};
+  const snapshot = result.marketSnapshot || {};
+  const counts = summary.counts || {};
+  const score = Math.round((summary.conclusionSupportScore || 0) * 100);
+  const weakest = summary.weakestPremiseText || "뚜렷하게 약한 근거가 잡히지 않았어요.";
+
+  if (/(약한|취약|weak|근거)/.test(normalized)) {
+    return `가장 약한 근거는 "${weakest}" 쪽이에요. 이 부분이 검증 불가, 만료, 충돌 중 어디에 걸리는지 먼저 확인하는 게 좋아요.`;
+  }
+
+  if (/(믿|신뢰|결론|점수|score|cred)/.test(normalized)) {
+    return `현재 결론 근거 점수는 ${score}%예요. 지지 ${counts.supported || 0}개, 충돌 ${counts.contradicted || 0}개, 검증 불가 ${counts.unverifiable || 0}개라서 점수 하나보다 충돌과 검증 불가 항목을 같이 봐야 합니다.`;
+  }
+
+  if (/(다음|확인|체크|뭘|무엇|next)/.test(normalized)) {
+    return "다음에는 1분 거래량 비율, 매수/매도 물량 비율, 그리고 검증 불가로 남은 주장을 확인해보세요. 특히 사람 의도나 세력 관련 문장은 공개 데이터로 확인하기 어렵습니다.";
+  }
+
+  if (/(시장|가격|거래량|호가|데이터|upbit|업비트)/.test(normalized)) {
+    const price = snapshot.currentPrice
+      ? `${Math.round(snapshot.currentPrice).toLocaleString("ko-KR")}원`
+      : "확인 안 됨";
+    const volume = snapshot.volumeRatio ? `${snapshot.volumeRatio.toFixed(2)}x` : "확인 안 됨";
+    const bidAsk = snapshot.bidAskRatio ? snapshot.bidAskRatio.toFixed(2) : "확인 안 됨";
+    return `시장 데이터는 현재가 ${price}, 거래량 비율 ${volume}, 매수/매도 물량 비율 ${bidAsk}로 들어왔어요. 데이터 오류가 있으면 결과 패널의 Upbit 오류 항목도 같이 봐주세요.`;
+  }
+
+  if (/(검증|불가|왜|unverifiable)/.test(normalized)) {
+    return `검증 불가 항목은 ${counts.unverifiable || 0}개예요. 보통 세력 의도, 고래 매집, 분위기 같은 주장은 가격이나 호가 데이터만으로 직접 확인하기 어렵기 때문에 따로 분리됩니다.`;
+  }
+
+  return "이 챗봇은 지금 화면의 최신 분석 결과를 짧게 풀어주는 용도예요. '가장 약한 근거가 뭐야?', '결론을 믿어도 돼?', '다음에 뭘 확인해야 해?'처럼 물어보면 더 정확히 답할 수 있어요.";
 }
 
 function renderClaimList(nodes) {
