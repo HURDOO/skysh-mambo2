@@ -11,8 +11,9 @@
       <section class="workspace">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Argument Ledger</p>
+            <p class="eyebrow">투자 글 근거 분석</p>
             <h1>ClaimGraph</h1>
+            <p class="tagline">글의 분위기가 아니라, 결론이 어떤 근거 위에 서 있는지 봅니다.</p>
           </div>
           <div class="status-pill" id="apiStatus">API 확인 중</div>
         </header>
@@ -36,21 +37,49 @@
             <button type="submit" class="primary-button" id="analyzeButton">분석 실행</button>
           </form>
 
-          <aside class="score-panel" aria-label="분석 점수">
-            <div class="score-block">
-              <span>Claim Coverage</span>
-              <strong id="claimCoverage">--</strong>
+          <aside class="result-panel" aria-label="분석 요약">
+            <div class="verdict-head">
+              <span id="riskLabel">분석 대기</span>
+              <strong id="verdictTitle">글을 입력하면 결론 근거를 계산합니다</strong>
             </div>
-            <div class="score-block">
-              <span>Evidence Support</span>
-              <strong id="evidenceScore">--</strong>
+
+            <p class="assessment" id="assessment">분석 결과가 여기에 표시됩니다.</p>
+
+            <div class="metric-list" aria-label="핵심 점수">
+              <div class="metric-row">
+                <div>
+                  <strong>검증 가능한 주장</strong>
+                  <span>글에서 실제 데이터로 확인할 수 있는 부분</span>
+                </div>
+                <div class="meter">
+                  <span id="claimCoverageBar"></span>
+                </div>
+                <b id="claimCoverage">--</b>
+              </div>
+              <div class="metric-row">
+                <div>
+                  <strong>데이터 지지</strong>
+                  <span>검증 가능한 주장 중 현재 데이터와 맞는 정도</span>
+                </div>
+                <div class="meter">
+                  <span id="evidenceScoreBar"></span>
+                </div>
+                <b id="evidenceScore">--</b>
+              </div>
+              <div class="metric-row emphasis">
+                <div>
+                  <strong>결론 근거</strong>
+                  <span>최종 결론이 검증된 전제에 기대는 정도</span>
+                </div>
+                <div class="meter">
+                  <span id="conclusionScoreBar"></span>
+                </div>
+                <b id="conclusionScore">--</b>
+              </div>
             </div>
-            <div class="score-block accent">
-              <span>Conclusion Support</span>
-              <strong id="conclusionScore">--</strong>
-            </div>
-            <div class="risk-box">
-              <span>Weakest Premise</span>
+
+            <div class="weakest-row">
+              <span>가장 약한 근거</span>
               <strong id="weakestPremise">--</strong>
             </div>
           </aside>
@@ -58,18 +87,52 @@
 
         <section class="graph-section">
           <div class="section-head">
-            <h2>논리 그래프</h2>
-            <span id="riskLabel">대기 중</span>
+            <div>
+              <h2>근거 흐름</h2>
+              <p>왼쪽의 개별 주장이 오른쪽 결론을 얼마나 받치는지 보여줍니다.</p>
+            </div>
+            <span id="graphSummary">대기 중</span>
           </div>
           <div class="graph-frame">
             <svg id="claimGraph" role="img" aria-label="ClaimGraph 논리 그래프"></svg>
           </div>
         </section>
 
+        <section class="legend-panel" aria-label="상태 설명">
+          <div class="legend-item">
+            <span class="dot state-SUPPORTED"></span>
+            <strong>지지됨</strong>
+            <p>현재 업비트 데이터와 대체로 맞습니다.</p>
+          </div>
+          <div class="legend-item">
+            <span class="dot state-CONTRADICTED"></span>
+            <strong>충돌</strong>
+            <p>현재 데이터와 반대로 보입니다.</p>
+          </div>
+          <div class="legend-item">
+            <span class="dot state-PENDING"></span>
+            <strong>대기</strong>
+            <p>조건이 아직 발생하지 않았습니다.</p>
+          </div>
+          <div class="legend-item">
+            <span class="dot state-EXPIRED"></span>
+            <strong>만료</strong>
+            <p>한때 맞았어도 지금 근거로 쓰기 어렵습니다.</p>
+          </div>
+          <div class="legend-item">
+            <span class="dot state-UNVERIFIABLE"></span>
+            <strong>검증 불가</strong>
+            <p>공개 데이터로는 확인할 수 없습니다.</p>
+          </div>
+        </section>
+
         <section class="details-grid">
           <div class="panel">
             <div class="section-head">
-              <h2>원자 명제</h2>
+              <div>
+                <h2>쪼개진 주장</h2>
+                <p>입력 글에서 추출한 근거와 결론 후보입니다.</p>
+              </div>
               <span id="claimCount">0개</span>
             </div>
             <div class="claim-list" id="claimList"></div>
@@ -77,11 +140,33 @@
 
           <div class="panel">
             <div class="section-head">
-              <h2>중립 평가</h2>
+              <div>
+                <h2>시장 데이터</h2>
+                <p>판정에 사용한 업비트 스냅샷입니다.</p>
+              </div>
               <span id="marketSource">Upbit</span>
             </div>
-            <p class="assessment" id="assessment">분석 결과가 여기에 표시됩니다.</p>
             <dl class="snapshot-list">
+              <div>
+                <dt>요청 ID</dt>
+                <dd id="requestId">--</dd>
+              </div>
+              <div>
+                <dt>분석 시각</dt>
+                <dd id="generatedAt">--</dd>
+              </div>
+              <div>
+                <dt>분석 방식</dt>
+                <dd id="parserSource">--</dd>
+              </div>
+              <div>
+                <dt>Fallback 사유</dt>
+                <dd id="fallbackReason">--</dd>
+              </div>
+              <div>
+                <dt>분석 마켓</dt>
+                <dd id="analyzedSymbol">--</dd>
+              </div>
               <div>
                 <dt>현재가</dt>
                 <dd id="currentPrice">--</dd>
@@ -93,6 +178,10 @@
               <div>
                 <dt>매수/매도 잔량</dt>
                 <dd id="bidAskRatio">--</dd>
+              </div>
+              <div>
+                <dt>데이터 오류</dt>
+                <dd id="upbitErrors">--</dd>
               </div>
             </dl>
           </div>

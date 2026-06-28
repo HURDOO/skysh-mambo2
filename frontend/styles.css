@@ -93,6 +93,13 @@ h2 {
   letter-spacing: 0;
 }
 
+.tagline {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
 .status-pill,
 .section-head span,
 .ghost-button {
@@ -125,9 +132,10 @@ h2 {
 }
 
 .input-panel,
-.score-panel,
+.result-panel,
 .panel,
-.graph-section {
+.graph-section,
+.legend-panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -218,50 +226,103 @@ textarea:focus {
   opacity: 0.68;
 }
 
-.score-panel {
+.result-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 18px;
+  padding: 22px;
+}
+
+.verdict-head {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.verdict-head span {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: #edf2ff;
+  color: var(--blue);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.verdict-head strong {
+  font-size: clamp(1.35rem, 2vw, 2rem);
+  line-height: 1.18;
+  letter-spacing: 0;
+}
+
+.metric-list {
+  display: grid;
+  gap: 14px;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(110px, 150px) 54px;
+  align-items: center;
   gap: 12px;
-  padding: 18px;
 }
 
-.score-block,
-.risk-box {
-  display: grid;
-  align-content: center;
-  min-height: 118px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-strong);
+.metric-row strong {
+  display: block;
+  font-size: 0.92rem;
 }
 
-.score-block span,
-.risk-box span {
+.metric-row span {
+  display: block;
+  margin-top: 3px;
   color: var(--muted);
   font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.score-block strong {
-  margin-top: 8px;
-  font-size: 2rem;
-  line-height: 1;
-}
-
-.score-block.accent {
-  border-color: rgba(47, 104, 216, 0.32);
-}
-
-.risk-box {
-  grid-column: span 2;
-  min-height: 86px;
-}
-
-.risk-box strong {
-  margin-top: 8px;
-  font-size: 1rem;
   line-height: 1.35;
+}
+
+.metric-row b {
+  text-align: right;
+  font-size: 1.05rem;
+}
+
+.metric-row.emphasis strong,
+.metric-row.emphasis b {
+  color: var(--blue);
+}
+
+.meter {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6ebf2;
+}
+
+.meter span {
+  display: block;
+  width: 0%;
+  height: 100%;
+  margin: 0;
+  border-radius: inherit;
+  background: var(--blue);
+  transition: width 220ms ease;
+}
+
+.weakest-row {
+  display: grid;
+  gap: 7px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.weakest-row span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.weakest-row strong {
+  line-height: 1.42;
 }
 
 .graph-section {
@@ -275,6 +336,17 @@ textarea:focus {
   justify-content: space-between;
   gap: 14px;
   margin-bottom: 14px;
+}
+
+.section-head div {
+  min-width: 0;
+}
+
+.section-head p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.35;
 }
 
 .section-head span {
@@ -304,6 +376,45 @@ textarea:focus {
   height: 460px;
 }
 
+.legend-panel {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.legend-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 8px;
+  align-content: start;
+  padding: 14px;
+  border-right: 1px solid var(--line);
+}
+
+.legend-item:last-child {
+  border-right: 0;
+}
+
+.legend-item strong {
+  font-size: 0.86rem;
+}
+
+.legend-item p {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 999px;
+}
+
 .details-grid {
   grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
 }
@@ -319,43 +430,59 @@ textarea:focus {
 
 .claim-item {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 12px;
   min-height: 72px;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-strong);
 }
 
-.claim-id {
+.claim-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+
+.claim-id,
+.claim-type {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 900;
 }
 
+.claim-type {
+  border-radius: 999px;
+  background: #eef1f5;
+  padding: 3px 7px;
+}
+
 .claim-text {
   display: grid;
-  gap: 4px;
+  gap: 7px;
   min-width: 0;
 }
 
 .claim-text strong {
   overflow-wrap: anywhere;
-  font-size: 0.94rem;
+  font-size: 0.98rem;
+  line-height: 1.35;
 }
 
 .claim-text span {
   color: var(--muted);
-  font-size: 0.8rem;
-  line-height: 1.35;
+  font-size: 0.84rem;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
 .state-badge {
   justify-self: end;
-  min-width: 116px;
+  min-width: 112px;
   border-radius: 999px;
   padding: 7px 10px;
   color: #fff;
@@ -372,6 +499,10 @@ textarea:focus {
   background: var(--red);
 }
 
+.state-UNSUPPORTED_CONCLUSION {
+  background: var(--red);
+}
+
 .state-UNVERIFIABLE {
   background: var(--gray);
 }
@@ -385,10 +516,9 @@ textarea:focus {
 }
 
 .assessment {
-  min-height: 108px;
   color: #303846;
   font-size: 1.02rem;
-  line-height: 1.65;
+  line-height: 1.6;
 }
 
 .snapshot-list {
@@ -465,12 +595,8 @@ textarea:focus {
     justify-self: start;
   }
 
-  .score-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .risk-box {
-    grid-column: span 1;
+  .legend-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .claim-item {
@@ -504,5 +630,32 @@ textarea:focus {
 
   .section-head span {
     max-width: 100%;
+  }
+
+  .metric-row {
+    grid-template-columns: 1fr 52px;
+  }
+
+  .meter {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .metric-row b {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .legend-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .legend-item {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .legend-item:last-child {
+    border-bottom: 0;
   }
 }

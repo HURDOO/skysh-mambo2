@@ -4,9 +4,13 @@ const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
 
+loadEnvFile(path.resolve(__dirname, "../.env"));
+
 const PORT = Number(process.env.PORT || 3000);
 const FRONTEND_DIR = path.resolve(__dirname, "../frontend");
 const UPBIT_BASE_URL = "https://api.upbit.com";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+const LOG_LEVEL = process.env.LOG_LEVEL || "debug";
 
 const STATE_SCORE = {
   SUPPORTED: 1,
@@ -23,6 +27,72 @@ const MIME_TYPES = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml; charset=utf-8"
 };
+
+function loadEnvFile(envPath) {
+  if (!fs.existsSync(envPath)) return;
+
+  const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const equalsIndex = trimmed.indexOf("=");
+    if (equalsIndex === -1) continue;
+
+    const key = trimmed.slice(0, equalsIndex).trim();
+    let value = trimmed.slice(equalsIndex + 1).trim();
+    if (!key || process.env[key] !== undefined) continue;
+
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  }
+}
+
+function createRequestId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function logInfo(event, details = {}) {
+  if (LOG_LEVEL === "silent") return;
+  const payload = {
+    time: new Date().toISOString(),
+    event,
+    ...details
+  };
+  console.log(`[ClaimGraph] ${JSON.stringify(payload)}`);
+}
+
+function logError(event, error, details = {}) {
+  if (LOG_LEVEL === "silent") return;
+  const payload = {
+    time: new Date().toISOString(),
+    event,
+    ...details,
+    error: describeError(error)
+  };
+  console.error(`[ClaimGraph] ${JSON.stringify(payload)}`);
+}
+
+function describeError(error) {
+  if (!error) return "Unknown error";
+  const parts = [
+    error.message,
+    error.code,
+    error.errno,
+    error.syscall,
+    error.cause?.message,
+    error.cause?.code,
+    error.cause?.errno,
+    error.cause?.syscall
+  ].filter(Boolean);
+  return parts.length ? parts.join(" | ") : String(error);
+}
 
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
@@ -87,7 +157,7 @@ function httpsJson(pathname, timeoutMs = 4500) {
         });
         res.on("end", () => {
           if (res.statusCode < 200 || res.statusCode >= 300) {
-            reject(new Error(`Upbit returned ${res.statusCode}`));
+            reject(new Error(`Upbit returned ${res.statusCode}: ${raw.slice(0, 180)}`));
             return;
           }
 
@@ -103,7 +173,9 @@ function httpsJson(pathname, timeoutMs = 4500) {
     req.on("timeout", () => {
       req.destroy(new Error("Upbit request timed out."));
     });
-    req.on("error", reject);
+    req.on("error", (error) => {
+      reject(new Error(describeError(error)));
+    });
   });
 }
 
@@ -114,7 +186,8 @@ function normalizeMarket(symbol) {
   return `KRW-${raw.replace(/^KRW/, "")}`;
 }
 
-async function loadMarketSnapshot(market) {
+async function loadMarketSnapshot(market, requestId = null) {
+  const startedAt = Date.now();
   const encodedMarket = encodeURIComponent(market);
   const snapshot = {
     market,
@@ -127,6 +200,12 @@ async function loadMarketSnapshot(market) {
     metrics: null,
     errors: []
   };
+
+  logInfo("upbit.request.start", {
+    requestId,
+    market,
+    endpoints: ["ticker", "orderbook", "candles/minutes/1"]
+  });
 
   const requests = await Promise.allSettled([
     httpsJson(`/v1/ticker?markets=${encodedMarket}`),
@@ -147,6 +226,19 @@ async function loadMarketSnapshot(market) {
 
   snapshot.available = Boolean(snapshot.ticker || snapshot.orderbook || snapshot.candles.length);
   snapshot.metrics = buildMarketMetrics(snapshot);
+  logInfo("upbit.request.done", {
+    requestId,
+    market,
+    ms: Date.now() - startedAt,
+    available: snapshot.available,
+    ticker: Boolean(snapshot.ticker),
+    orderbook: Boolean(snapshot.orderbook),
+    candles: snapshot.candles.length,
+    currentPrice: snapshot.metrics?.currentPrice || null,
+    volumeRatio: snapshot.metrics?.volumeRatio ? round2(snapshot.metrics.volumeRatio) : null,
+    bidAskRatio: snapshot.metrics?.bidAskRatio ? round2(snapshot.metrics.bidAskRatio) : null,
+    errors: snapshot.errors
+  });
   return snapshot;
 }
 
@@ -252,6 +344,305 @@ function parseClaims(text) {
   }
 
   return claims.slice(0, 12);
+}
+
+async function parseClaimsForAnalysis(text, market, snapshot, requestId = null) {
+  if (!process.env.GEMINI_API_KEY) {
+    logInfo("parser.fallback", {
+      requestId,
+      reason: "GEMINI_API_KEY is not set.",
+      source: "heuristic"
+    });
+    return {
+      source: "heuristic",
+      fallbackReason: "GEMINI_API_KEY is not set.",
+      claims: parseClaims(text),
+      gemini: null
+    };
+  }
+
+  try {
+    logInfo("gemini.request.start", {
+      requestId,
+      model: GEMINI_MODEL,
+      market,
+      inputChars: text.length
+    });
+    const geminiResult = await parseClaimsWithGemini(text, market, snapshot, requestId);
+    if (!geminiResult.claims.length) {
+      throw new Error("Gemini returned an empty graph.");
+    }
+
+    logInfo("gemini.request.done", {
+      requestId,
+      model: GEMINI_MODEL,
+      claims: geminiResult.claims.length,
+      credibility: geminiResult.meta.credibility,
+      weakestPremise: geminiResult.meta.weakestPremise
+    });
+
+    return {
+      source: "gemini",
+      fallbackReason: null,
+      claims: geminiResult.claims,
+      gemini: geminiResult.meta
+    };
+  } catch (error) {
+    logError("gemini.request.failed", error, {
+      requestId,
+      model: GEMINI_MODEL,
+      fallback: "heuristic"
+    });
+    return {
+      source: "heuristic",
+      fallbackReason: error.message,
+      claims: parseClaims(text),
+      gemini: {
+        used: false,
+        model: GEMINI_MODEL,
+        error: error.message
+      }
+    };
+  }
+}
+
+async function parseClaimsWithGemini(text, market, snapshot, requestId = null) {
+  const { GoogleGenAI, Type, ThinkingLevel } = await import("@google/genai");
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY
+  });
+
+  const config = {
+    tools: [
+      {
+        googleSearch: {}
+      }
+    ],
+    responseMimeType: "application/json",
+    responseSchema: buildGeminiResponseSchema(Type),
+    systemInstruction: [
+      {
+        text: `task: 주어지는 투자 커뮤니티 글과 종목 데이터를 분석하여 주장의 신빙성을 분석
+
+        detail:
+
+1. Credibility에는 최종 신빙성을 0-100 사이의 백분율 정수로 작성한다.
+2. TotalEvaluation에는 최종 종합 평가를 자연어 문장 형식으로 작성한다.
+3. WeakestPremise에는 가장 취약한 전제를 자연어 문장 형식으로 작성한다.
+
+4. Graph 아래에는 Node 프로퍼티로 논리 그래프를 구성해야 한다.
+이때 논리 그래프란, 원인과 결과를 화살표로 이은 논리 구조이다.
+원인과 결과는 없거나 여러 개가 될 수 있으며, 화살표 또한 여러 항목을 가리킬 수 있다. 주의할 점은 문장의 명제는 빠짐없이 작성해야 되며, 가능한 모든 관계를 도출해야 한다.  
+5. NodeName에는 노드로 표현하고자 하는 논리 항목을 수정 단어 없이 자연어로 작성한다.
+6. NodeID는 그래프 구성에서 노드를 식별하는 정수 아이디다.
+NodeSupportID는 이 노드가 화살표로 가리킬 대상 노드의 NodeID다.
+NodeState는 당신이 판단한 논리 상태를 1-4 사이의 정수 문자열로 표시한다.
+1) 검증불가
+2) 지지됨
+3) 만료됨
+4) 충돌
+
+주의:
+- 가격 상승을 예측하거나 투자 조언을 하지 말고, 글의 결론이 어떤 전제에 의존하는지만 분석한다.
+- 공개 데이터로 확인할 수 없는 세력, 고래, 기관의 의도는 검증불가로 둔다.
+- 문장 전체를 참/거짓으로 단정하지 말고, 원자 주장과 결론을 분리한다.`
+      }
+    ]
+  };
+
+  if (ThinkingLevel?.MINIMAL) {
+    config.thinkingConfig = {
+      thinkingLevel: ThinkingLevel.MINIMAL
+    };
+  }
+
+  const contents = [
+    {
+      role: "user",
+      parts: [
+        {
+          text: buildGeminiInput(text, market, snapshot)
+        }
+      ]
+    }
+  ];
+
+  const response = await ai.models.generateContentStream({
+    model: GEMINI_MODEL,
+    config,
+    contents
+  });
+
+  let raw = "";
+  for await (const chunk of response) {
+    const chunkText = typeof chunk.text === "function" ? chunk.text() : chunk.text;
+    if (chunkText) raw += chunkText;
+  }
+
+  logInfo("gemini.response.raw", {
+    requestId,
+    chars: raw.length,
+    preview: raw.slice(0, 220)
+  });
+
+  const parsed = parseGeminiJson(raw);
+  const claims = convertGeminiGraphToClaims(parsed.Graph);
+
+  return {
+    claims,
+    meta: {
+      used: true,
+      model: GEMINI_MODEL,
+      credibility: normalizeInteger(parsed.Credibility),
+      totalEvaluation: stringOrNull(parsed.TotalEvaluation),
+      weakestPremise: stringOrNull(parsed.WeakestPremise),
+      graphNodeCount: claims.length,
+      rawGraphNodeCount: Array.isArray(parsed.Graph) ? parsed.Graph.length : 0
+    }
+  };
+}
+
+function buildGeminiResponseSchema(Type) {
+  return {
+    type: Type.OBJECT,
+    required: ["Credibility", "TotalEvaluation", "WeakestPremise", "Graph"],
+    properties: {
+      Credibility: {
+        type: Type.INTEGER
+      },
+      TotalEvaluation: {
+        type: Type.STRING
+      },
+      WeakestPremise: {
+        type: Type.STRING
+      },
+      Graph: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          required: ["Node"],
+          properties: {
+            Node: {
+              type: Type.OBJECT,
+              required: ["NodeID", "NodeName", "NodeState"],
+              properties: {
+                NodeID: {
+                  type: Type.INTEGER
+                },
+                NodeName: {
+                  type: Type.STRING
+                },
+                NodeSupportID: {
+                  type: Type.INTEGER
+                },
+                NodeState: {
+                  type: Type.STRING
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
+function buildGeminiInput(text, market, snapshot) {
+  return [
+    `종목: ${market}`,
+    "업비트 데이터 요약:",
+    JSON.stringify(buildGeminiMarketContext(snapshot), null, 2),
+    "분석할 투자 커뮤니티 글:",
+    text
+  ].join("\n\n");
+}
+
+function buildGeminiMarketContext(snapshot) {
+  const metrics = snapshot.metrics || {};
+  return {
+    available: snapshot.available,
+    fetchedAt: snapshot.fetchedAt,
+    currentPrice: metrics.currentPrice || null,
+    volumeRatio: metrics.volumeRatio ? round2(metrics.volumeRatio) : null,
+    priceChange10m: metrics.priceChange10m ? round2(metrics.priceChange10m) : null,
+    bidAskRatio: metrics.bidAskRatio ? round2(metrics.bidAskRatio) : null,
+    hasBidWall: Boolean(metrics.hasBidWall),
+    orderbookAgeSeconds: metrics.orderbookAgeSeconds,
+    candleAgeSeconds: metrics.candleAgeSeconds,
+    errors: snapshot.errors
+  };
+}
+
+function parseGeminiJson(raw) {
+  const trimmed = String(raw || "")
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  if (!trimmed) throw new Error("Gemini returned an empty response.");
+
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) throw error;
+    return JSON.parse(trimmed.slice(start, end + 1));
+  }
+}
+
+function convertGeminiGraphToClaims(graph) {
+  if (!Array.isArray(graph)) return [];
+
+  return graph
+    .map((item) => item?.Node || item?.node || item)
+    .filter((node) => node && stringOrNull(node.NodeName))
+    .slice(0, 12)
+    .map((node, index) => {
+      const text = stringOrNull(node.NodeName).slice(0, 140);
+      return {
+        id: `P${index + 1}`,
+        text,
+        type: inferClaimType(text),
+        sourceText: text,
+        llmNodeId: normalizeInteger(node.NodeID),
+        llmSupportId: normalizeInteger(node.NodeSupportID),
+        llmState: mapGeminiNodeState(node.NodeState)
+      };
+    });
+}
+
+function inferClaimType(text) {
+  const detected = detectClaimTypes(text);
+  if (detected.length) return detected[0];
+  return "generic_market_claim";
+}
+
+function mapGeminiNodeState(value) {
+  const state = String(value || "").trim();
+  const states = {
+    "1": "UNVERIFIABLE",
+    "2": "SUPPORTED",
+    "3": "EXPIRED",
+    "4": "CONTRADICTED",
+    검증불가: "UNVERIFIABLE",
+    지지됨: "SUPPORTED",
+    만료됨: "EXPIRED",
+    충돌: "CONTRADICTED"
+  };
+  return states[state] || null;
+}
+
+function normalizeInteger(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number) : null;
+}
+
+function stringOrNull(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
 }
 
 function detectClaimTypes(fragment) {
@@ -618,7 +1009,7 @@ function conclusionState(score, premises) {
 
   if (unverifiableWeight / totalWeight >= 0.45) return "UNVERIFIABLE";
   if (score >= 0.65) return "SUPPORTED";
-  if (score <= 0.18) return "CONTRADICTED";
+  if (score <= 0.18) return "UNSUPPORTED_CONCLUSION";
   return "PENDING";
 }
 
@@ -757,6 +1148,7 @@ function round2(value) {
 }
 
 async function analyzeClaimGraph(input) {
+  const requestId = createRequestId();
   const text = String(input.text || "").trim();
   if (!text) {
     const error = new Error("text is required");
@@ -765,14 +1157,35 @@ async function analyzeClaimGraph(input) {
   }
 
   const market = normalizeMarket(input.symbol);
-  const rawClaims = parseClaims(text);
-  const snapshot = await loadMarketSnapshot(market);
+  logInfo("analysis.start", {
+    requestId,
+    market,
+    textChars: text.length,
+    textPreview: text.slice(0, 90)
+  });
+
+  const snapshot = await loadMarketSnapshot(market, requestId);
+  const parsedClaims = await parseClaimsForAnalysis(text, market, snapshot, requestId);
+  const rawClaims = parsedClaims.claims;
   const evaluatedClaims = rawClaims.map((claim) => evaluateClaim(claim, snapshot));
   const graph = buildGraph(evaluatedClaims);
   const summary = buildSummary(graph);
 
+  logInfo("analysis.done", {
+    requestId,
+    market,
+    parser: parsedClaims.source,
+    claims: rawClaims.length,
+    nodes: graph.nodes.length,
+    edges: graph.edges.length,
+    riskLabel: summary.riskLabel,
+    conclusionSupportScore: summary.conclusionSupportScore,
+    upbitAvailable: snapshot.available
+  });
+
   return {
     success: true,
+    requestId,
     symbol: market,
     generatedAt: new Date().toISOString(),
     marketSnapshot: {
@@ -783,6 +1196,11 @@ async function analyzeClaimGraph(input) {
       volumeRatio: snapshot.metrics?.volumeRatio ? round2(snapshot.metrics.volumeRatio) : null,
       bidAskRatio: snapshot.metrics?.bidAskRatio ? round2(snapshot.metrics.bidAskRatio) : null,
       errors: snapshot.errors
+    },
+    parser: {
+      source: parsedClaims.source,
+      fallbackReason: parsedClaims.fallbackReason,
+      gemini: parsedClaims.gemini
     },
     graph: {
       nodes: graph.nodes,
@@ -807,9 +1225,29 @@ async function routeApi(req, res) {
     try {
       const body = await readRequestBody(req);
       const payload = body ? JSON.parse(body) : {};
+      logInfo("http.request", {
+        method: req.method,
+        url: req.url,
+        symbol: payload.symbol || null,
+        bodyChars: body.length,
+        textChars: typeof payload.text === "string" ? payload.text.length : 0
+      });
       const result = await analyzeClaimGraph(payload);
+      logInfo("http.response", {
+        method: req.method,
+        url: req.url,
+        status: 200,
+        requestId: result.requestId,
+        parser: result.parser?.source,
+        symbol: result.symbol
+      });
       sendJson(res, 200, result);
     } catch (error) {
+      logError("http.response.failed", error, {
+        method: req.method,
+        url: req.url,
+        status: error.statusCode || 500
+      });
       sendJson(res, error.statusCode || 500, {
         success: false,
         error: error.message || "ANALYSIS_FAILED"

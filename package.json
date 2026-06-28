@@ -9,6 +9,10 @@
     "dev": "node backend/server.js",
     "smoke": "node backend/smoke-test.js"
   },
+  "dependencies": {
+    "@google/genai": "latest",
+    "mime": "latest"
+  },
   "engines": {
     "node": ">=18"
   }

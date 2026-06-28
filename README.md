@@ -5,6 +5,7 @@ ClaimGraph는 투자 커뮤니티 글을 원자 명제와 결론으로 분해하
 ## 실행
 
 ```bash
+npm install
 npm start
 ```
 
@@ -14,8 +15,19 @@ npm start
 ## 구조
 
 - `frontend/`: 입력 폼, 점수 패널, 논리 그래프 SVG UI
-- `backend/`: Node 내장 모듈 기반 API 서버와 ClaimGraph 분석 엔진
+- `backend/`: API 서버, Gemini claim parser, Upbit 검증 엔진
 - `POST /api/v1/claimgraph/analyze`: 글과 마켓 심볼을 받아 그래프와 요약 점수를 반환
+
+## Gemini 설정
+
+루트에 `.env` 파일을 만들고 Gemini API 키를 넣습니다.
+
+```env
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite
+```
+
+`GEMINI_API_KEY`가 없거나 Gemini 호출이 실패하면 기존 기본 parser로 자동 fallback됩니다.
 
 ## API 예시
 
@@ -27,6 +39,7 @@ curl -X POST http://localhost:3000/api/v1/claimgraph/analyze \
 
 ## MVP 범위
 
+- Gemini parser: 투자 글을 원자 명제와 논리 그래프 초안으로 분해
 - 거래량 주장: 최근 1분 거래량과 이전 구간 중앙값 비교
 - 가격 움직임 주장: 현재가, 최근 변화율, 조건부 돌파 여부 확인
 - 호가창 주장: 상위 호가 매수/매도 잔량 비율과 매수벽 집중도 확인
