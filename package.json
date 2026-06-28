@@ -1,0 +1,15 @@
+{
+  "name": "claimgraph-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ClaimGraph hackathon MVP with separated frontend and backend.",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js",
+    "smoke": "node backend/smoke-test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

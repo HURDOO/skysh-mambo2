@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ClaimGraph</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Argument Ledger</p>
+            <h1>ClaimGraph</h1>
+          </div>
+          <div class="status-pill" id="apiStatus">API 확인 중</div>
+        </header>
+
+        <section class="analysis-layout">
+          <form class="input-panel" id="analysisForm">
+            <div class="field-row">
+              <label for="symbolInput">마켓</label>
+              <input id="symbolInput" name="symbol" value="KRW-SOL" autocomplete="off" />
+            </div>
+
+            <label class="textarea-label" for="postInput">투자 커뮤니티 글</label>
+            <textarea id="postInput" name="text" spellcheck="false">솔라나 거래량 터졌다. 매수벽도 두껍고 18만 원 돌파하면 20만 원까지 열려 있다. 세력 매집 들어온 듯. 지금 안 타면 늦는다.</textarea>
+
+            <div class="sample-row" aria-label="샘플 글">
+              <button type="button" class="ghost-button" data-sample="sol">SOL</button>
+              <button type="button" class="ghost-button" data-sample="btc">BTC</button>
+              <button type="button" class="ghost-button" data-sample="xrp">XRP</button>
+            </div>
+
+            <button type="submit" class="primary-button" id="analyzeButton">분석 실행</button>
+          </form>
+
+          <aside class="score-panel" aria-label="분석 점수">
+            <div class="score-block">
+              <span>Claim Coverage</span>
+              <strong id="claimCoverage">--</strong>
+            </div>
+            <div class="score-block">
+              <span>Evidence Support</span>
+              <strong id="evidenceScore">--</strong>
+            </div>
+            <div class="score-block accent">
+              <span>Conclusion Support</span>
+              <strong id="conclusionScore">--</strong>
+            </div>
+            <div class="risk-box">
+              <span>Weakest Premise</span>
+              <strong id="weakestPremise">--</strong>
+            </div>
+          </aside>
+        </section>
+
+        <section class="graph-section">
+          <div class="section-head">
+            <h2>논리 그래프</h2>
+            <span id="riskLabel">대기 중</span>
+          </div>
+          <div class="graph-frame">
+            <svg id="claimGraph" role="img" aria-label="ClaimGraph 논리 그래프"></svg>
+          </div>
+        </section>
+
+        <section class="details-grid">
+          <div class="panel">
+            <div class="section-head">
+              <h2>원자 명제</h2>
+              <span id="claimCount">0개</span>
+            </div>
+            <div class="claim-list" id="claimList"></div>
+          </div>
+
+          <div class="panel">
+            <div class="section-head">
+              <h2>중립 평가</h2>
+              <span id="marketSource">Upbit</span>
+            </div>
+            <p class="assessment" id="assessment">분석 결과가 여기에 표시됩니다.</p>
+            <dl class="snapshot-list">
+              <div>
+                <dt>현재가</dt>
+                <dd id="currentPrice">--</dd>
+              </div>
+              <div>
+                <dt>거래량 배율</dt>
+                <dd id="volumeRatio">--</dd>
+              </div>
+              <div>
+                <dt>매수/매도 잔량</dt>
+                <dd id="bidAskRatio">--</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
